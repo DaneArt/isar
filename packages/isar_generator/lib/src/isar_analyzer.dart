@@ -12,8 +12,7 @@ import 'package:dartx/dartx.dart';
 
 class IsarAnalyzer extends Builder {
   final _collectionAnnChecker = const TypeChecker.fromRuntime(Collection);
-  final _extcollectionAnnChecker =
-      const TypeChecker.fromRuntime(ExternalCollection);
+  final _extcollectionAnnChecker = const TypeChecker.fromRuntime(ExternalCollection);
 
   @override
   FutureOr<void> build(BuildStep buildStep) async {
@@ -51,8 +50,7 @@ class IsarAnalyzer extends Builder {
 
     final objectsJson = objects.map((e) => e.toJson()).toList();
     final json = JsonEncoder().convert(objectsJson);
-    await buildStep.writeAsString(
-        buildStep.inputId.changeExtension('.isarobject.json'), json);
+    await buildStep.writeAsString(buildStep.inputId.changeExtension('.isarobject.json'), json);
   }
 
   ObjectInfo? generateObjectInfo(Element element) {
@@ -70,8 +68,8 @@ class IsarAnalyzer extends Builder {
       err('Class must be public.', element);
     }
 
-    final hasZeroArgConstructor = modelClass.constructors
-        .any((c) => c.isPublic && !c.parameters.any((p) => !p.isOptional));
+    final hasZeroArgConstructor =
+        modelClass.constructors.any((c) => c.isPublic && !c.parameters.any((p) => !p.isOptional));
 
     if (!hasZeroArgConstructor) {
       err('Class needs to have a public zero-arg constructor.');
@@ -85,9 +83,9 @@ class IsarAnalyzer extends Builder {
     final properties = <ObjectProperty>[];
     final links = <ObjectLink>[];
     final converterImports = <String>{};
-    for (var propertyElement in modelClass.fields) {
+    for (var propertyElement in modelClass.fields.where(checkField)) {
       if (hasIgnoreAnn(propertyElement)) {
-        return null;
+        continue;
       }
 
       final converter = findTypeConverter(propertyElement);
@@ -95,8 +93,7 @@ class IsarAnalyzer extends Builder {
         converterImports.add(converter.location!.components[0]);
       }
 
-      if (propertyElement.type.element!.name == 'IsarLink' ||
-          propertyElement.type.element!.name == 'IsarLinks') {
+      if (propertyElement.type.element!.name == 'IsarLink' || propertyElement.type.element!.name == 'IsarLinks') {
         final link = analyzeObjectLink(propertyElement, converter);
         if (link == null) continue;
         links.add(link);
@@ -108,7 +105,7 @@ class IsarAnalyzer extends Builder {
     }
 
     final indexes = <ObjectIndex>[];
-    for (var propertyElement in modelClass.fields) {
+    for (var propertyElement in modelClass.fields.where(checkField)) {
       if (links.any((it) => it.dartName == propertyElement.name)) continue;
       final index = analyzeObjectIndex(properties, propertyElement);
       if (index == null) continue;
@@ -120,9 +117,7 @@ class IsarAnalyzer extends Builder {
     if (oidProperty == null) {
       for (var i = 0; i < properties.length; i++) {
         final property = properties[i];
-        if (property.isarName == 'id' &&
-            property.converter == null &&
-            property.isarType == IsarType.Long) {
+        if (property.isarName == 'id' && property.converter == null && property.isarType == IsarType.Long) {
           oidProperty = properties[i].copyWith(isId: true);
           properties[i] = oidProperty;
           break;
@@ -149,6 +144,27 @@ class IsarAnalyzer extends Builder {
     return modelInfo;
   }
 
+  bool checkField(FieldElement element) {
+    //Skip static fields
+    if (element.isStatic) {
+      return false;
+    }
+
+    // Check if the element is a pure getter (no setter defined)
+    if (element.setter == null) {
+      return false;
+    }
+
+    // Check if the element's getter and setter are not synthetic (the element is not a field).
+    // This means that the getter and the setter are explicitly defined in the code.
+    if (element.getter?.isSynthetic == false && element.setter?.isSynthetic == false) {
+      return false;
+    }
+
+    // This is surely a field.
+    return true;
+  }
+
   ClassElement? findTypeConverter(FieldElement property) {
     final annotations = getTypeConverterAnns(property);
     annotations.addAll(getTypeConverterAnns(property.enclosingElement));
@@ -164,12 +180,8 @@ class IsarAnalyzer extends Builder {
     return null;
   }
 
-  ObjectProperty? analyzeObjectProperty(
-      FieldElement property, ClassElement? converter) {
-    if (!property.isPublic ||
-        property.isFinal ||
-        property.isConst ||
-        property.isStatic) {
+  ObjectProperty? analyzeObjectProperty(FieldElement property, ClassElement? converter) {
+    if (!property.isPublic || property.isFinal || property.isConst || property.isStatic) {
       return null;
     }
 
@@ -271,13 +283,11 @@ class IsarAnalyzer extends Builder {
     } else if (isUint8List(type.element!)) {
       return IsarType.Bytes;
     }
-    err('Property has unsupported type. Use @IsarIgnore to ignore the property.',
-        element);
+    err('Property has unsupported type. Use @IsarIgnore to ignore the property.', element);
     throw 'unreachable';
   }
 
-  ObjectLink? analyzeObjectLink(
-      FieldElement property, ClassElement? converter) {
+  ObjectLink? analyzeObjectLink(FieldElement property, ClassElement? converter) {
     if (!property.isPublic || property.isStatic || hasIgnoreAnn(property)) {
       return null;
     }
@@ -314,8 +324,7 @@ class IsarAnalyzer extends Builder {
     );
   }
 
-  ObjectIndex? analyzeObjectIndex(
-      List<ObjectProperty> properties, FieldElement element) {
+  ObjectIndex? analyzeObjectIndex(List<ObjectProperty> properties, FieldElement element) {
     final property = properties.firstWhere((it) => it.dartName == element.name);
 
     final indexAnns = getIndexAnns(element).toList();
@@ -332,18 +341,15 @@ class IsarAnalyzer extends Builder {
     }
 
     final indexProperties = <ObjectIndexProperty>[];
-    final defaultIndexType =
-        property.isarType == IsarType.String ? IndexType.hash : IndexType.value;
-    final defaultCaseSensitive =
-        property.isarType == IsarType.String ? true : null;
+    final defaultIndexType = property.isarType == IsarType.String ? IndexType.hash : IndexType.value;
+    final defaultCaseSensitive = property.isarType == IsarType.String ? true : null;
     indexProperties.add(ObjectIndexProperty(
       property: property,
       indexType: index.indexType ?? defaultIndexType,
       caseSensitive: index.caseSensitive ?? defaultCaseSensitive,
     ));
     for (var c in index.composite) {
-      final compositeProperty =
-          properties.firstOrNullWhere((it) => it.isarName == c.property);
+      final compositeProperty = properties.firstOrNullWhere((it) => it.isarName == c.property);
       if (compositeProperty == null) {
         err('Property does not exist: "${c.property}".', element);
       } else {
@@ -355,27 +361,22 @@ class IsarAnalyzer extends Builder {
       }
     }
 
-    if (indexProperties.map((it) => it.property.isarName).distinct().length !=
-        indexProperties.length) {
+    if (indexProperties.map((it) => it.property.isarName).distinct().length != indexProperties.length) {
       err('Composite index contains duplicate properties.', element);
     }
 
     for (var i = 0; i < indexProperties.length; i++) {
       final indexProperty = indexProperties[i];
-      if (indexProperty.property.isarType.isDynamic &&
-          indexProperty.property.isarType != IsarType.String) {
+      if (indexProperty.property.isarType.isDynamic && indexProperty.property.isarType != IsarType.String) {
         err('This type does not support indexes.', element);
       }
       if (property.isarType == IsarType.String) {
-        if ((indexProperty.indexType == IndexType.value ||
-                indexProperty.indexType == IndexType.words) &&
+        if ((indexProperty.indexType == IndexType.value || indexProperty.indexType == IndexType.words) &&
             i != indexProperties.lastIndex) {
-          err('Only the last property of a composite index may use IndexType.value or IndexType.words.',
-              element);
+          err('Only the last property of a composite index may use IndexType.value or IndexType.words.', element);
         }
       } else if (indexProperty.indexType != IndexType.value) {
-        err('Only String indices may have a IndexType other than IndexType.value ${indexProperty.indexType}.',
-            element);
+        err('Only String indices may have a IndexType other than IndexType.value ${indexProperty.indexType}.', element);
       }
     }
 
@@ -391,14 +392,10 @@ class IsarAnalyzer extends Builder {
       for (var index2 in indexes) {
         if (identical(index, index2)) continue;
         if (index.properties.length <= index2.properties.length) {
-          final indexPropertyNames =
-              index.properties.map((it) => it.property.isarName);
-          final index2PropertyNames = index2.properties
-              .take(index.properties.length)
-              .map((it) => it.property.isarName);
+          final indexPropertyNames = index.properties.map((it) => it.property.isarName);
+          final index2PropertyNames = index2.properties.take(index.properties.length).map((it) => it.property.isarName);
           if (indexPropertyNames.contentEquals(index2PropertyNames)) {
-            err('There are multiple indexes with the prefix "${indexPropertyNames.join(', ')}"',
-                element);
+            err('There are multiple indexes with the prefix "${indexPropertyNames.join(', ')}"', element);
           }
         }
       }
